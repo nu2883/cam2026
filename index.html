@@ -114,6 +114,29 @@ button{font:inherit;color:inherit}
 #startMsg{color:var(--red);font-size:12px;min-height:16px}
 #toast{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);background:rgba(0,0,0,.88);border:1px solid var(--line);border-radius:999px;padding:8px 16px;font-size:12px;z-index:80;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center}
 #toast.show{opacity:1}
+
+/* ===== LANDSCAPE: kontrol pindah ke sisi kiri & kanan, kamera mengisi tengah ===== */
+@media (orientation:landscape){
+  #app{flex-direction:row}
+  .top{flex-direction:column;justify-content:center;gap:10px;flex:none;width:calc(64px + env(safe-area-inset-left));padding:8px 8px 8px calc(env(safe-area-inset-left) + 8px)}
+  .top .pill{width:44px;height:44px;padding:0;justify-content:center;border-radius:50%}
+  .top .pill .lbl{display:none}
+  .top .pill .i{width:20px!important;height:20px!important}
+  #stage{min-width:0}
+  .bottom{flex:none;width:calc(204px + env(safe-area-inset-right));border-radius:22px 0 0 22px;border-top:0;border-left:1px solid var(--line);
+    padding:10px calc(env(safe-area-inset-right) + 10px) 10px 10px;justify-content:center;gap:8px;overflow-y:auto}
+  .bottom .row{flex-wrap:wrap;justify-content:center;gap:6px}
+  #filters{flex-wrap:wrap;overflow:visible}
+  #filters button{padding:4px 9px;font-size:10.5px}
+  .shutter-row{padding:0;gap:6px}
+  #btnGallery{width:44px;height:44px}
+  #btnGuide{width:44px!important;height:44px!important}
+  #shutter{width:70px;height:70px}
+  #shutter i{width:52px;height:52px}
+  #hud{top:6px}
+  #telemetry{top:44px}
+  #toast{bottom:16px}
+}
 </style>
 </head>
 <body>
@@ -137,8 +160,8 @@ button{font:inherit;color:inherit}
 
   <div class="top">
     <button class="ib" id="btnFlash" aria-label="Flash"><svg class="i"><use href="#i-bolt-off"/></svg></button>
-    <button class="pill on" id="btnAI"><svg class="i" style="width:15px;height:15px"><use href="#i-crop"/></svg>AI CROP</button>
-    <button class="pill" id="btnGrid"><svg class="i" style="width:15px;height:15px"><use href="#i-grid"/></svg><span id="gridName">Thirds</span></button>
+    <button class="pill on" id="btnAI" aria-label="AI Crop"><svg class="i" style="width:15px;height:15px"><use href="#i-crop"/></svg><span class="lbl">AI CROP</span></button>
+    <button class="pill" id="btnGrid" aria-label="Grid"><svg class="i" style="width:15px;height:15px"><use href="#i-grid"/></svg><span id="gridName" class="lbl">Thirds</span></button>
     <button class="ib" id="btnFlip" aria-label="Ganti kamera"><svg class="i"><use href="#i-flip"/></svg></button>
     <button class="ib" id="btnSettings" aria-label="Pengaturan"><svg class="i"><use href="#i-sliders"/></svg></button>
   </div>
@@ -213,8 +236,9 @@ button{font:inherit;color:inherit}
       <p><b>1. Deteksi subjek.</b> Setiap ~0,1 detik frame kamera dianalisis: kontras warna, kekuatan tepi (Sobel) dan bias ke tengah menghasilkan peta saliency. Jika browser mendukung <i>Face Detector</i>, wajah dipakai sebagai subjek utama.</p>
       <p><b>2. Crop pintar.</b> Ukuran bingkai disesuaikan agar subjek mengisi ±55% bingkai, lalu posisinya digeser sehingga subjek jatuh tepat di titik kuat (1/3 atau 2/3). Untuk wajah, mata diletakkan di garis sepertiga atas.</p>
       <p><b>3. Skor &amp; kunci hijau.</b> Skor menggabungkan kecocokan titik sepertiga, ukuran subjek, subjek tidak terpotong, kemiringan HP (gyro), kestabilan, ketajaman, dan pencahayaan. Skor ≥ 78% yang bertahan ±0,7 detik mengunci bingkai menjadi hijau neon.</p>
-      <p><b>4. Ketuk layar</b> untuk menunjuk subjek sendiri. Ketuk chip "Subjek manual" untuk kembali otomatis.</p>
-      <p><b>5. Menyimpan.</b> Browser tidak bisa menulis langsung ke Galeri. Tombol Simpan membuka menu Bagikan (pilih "Simpan ke Foto/Galeri") atau mengunduh file JPG.</p>
+      <p><b>4. Orientasi otomatis.</b> Layout, rasio crop, dan indikator level mengikuti posisi HP (potret/landscape/terbalik) lewat sensor gravitasi. Subjek tinggi atau lebar akan disarankan memutar HP ke posisi yang lebih pas. Aktifkan Putar Otomatis di HP.</p>
+      <p><b>5. Ketuk layar</b> untuk menunjuk subjek sendiri. Ketuk chip "Subjek manual" untuk kembali otomatis.</p>
+      <p><b>6. Menyimpan.</b> Browser tidak bisa menulis langsung ke Galeri. Tombol Simpan membuka menu Bagikan (pilih "Simpan ke Foto/Galeri") atau mengunduh file JPG.</p>
     </div>
   </div>
 
@@ -409,10 +433,22 @@ function scoreComposition(o) {
   const score = Math.round(clamp(total * (0.7 + 0.3 * conf) * 100, 0, 99));
   return { score, parts, weakest, sizeDir: r < 0.3 ? 'small' : 'big' };
 }
+
+function angDiff(a, b) { return ((a - b + 540) % 360) - 180; }
+// Vektor "atas" dunia di kerangka HP -> orientasi fisik (k: 0 potret, ±1 landscape, 2 terbalik) + kemiringan horizon (roll)
+function attitudeFromAngles(beta, gamma, prevK) {
+  const b = beta * Math.PI / 180, g = gamma * Math.PI / 180;
+  const ux = -Math.sin(g) * Math.cos(b), uy = Math.sin(b);
+  if (Math.hypot(ux, uy) < 0.4) return { flat: true, k: prevK, roll: 0 };
+  const phi = Math.atan2(ux, uy) * 180 / Math.PI;
+  let k = Math.round(phi / 90);
+  if (Math.abs(angDiff(phi, prevK * 90)) <= 55) k = prevK;
+  return { flat: false, k, roll: clamp(angDiff(phi, k * 90), -45, 45) };
+}
 /* PURE:END */
 
 /* ---------- state & prefs ---------- */
-const ASPECTS = [{ id: '3:4', r: 3 / 4 }, { id: '4:3', r: 4 / 3 }, { id: '1:1', r: 1 }, { id: '16:9', r: 16 / 9 }, { id: '9:16', r: 9 / 16 }];
+const ASPECTS = [{ id: '4:3', long: 4 / 3 }, { id: '3:2', long: 3 / 2 }, { id: '16:9', long: 16 / 9 }, { id: '1:1', long: 1 }];
 const GRIDS = [{ id: 'thirds', name: 'Thirds' }, { id: 'phi', name: 'Golden' }, { id: 'center', name: 'Center' }, { id: 'none', name: 'Off' }];
 const FILTERS = [
   { id: 'gold', name: 'Pura Gold', css: 'contrast(1.08) saturate(1.12) sepia(0.08)', sat: 1.12, con: 1.08, gray: false },
@@ -422,8 +458,10 @@ const FILTERS = [
 ];
 const LOCK_ON = 78, LOCK_OFF = 66, HOLD_MS = 700;
 
-const prefs = Object.assign({ aspect: '3:4', filter: 'gold', grid: 'thirds', snap: false, sound: true, telemetry: false, uhd: false, ai: true },
+const prefs = Object.assign({ aspect: '4:3', filter: 'gold', grid: 'thirds', snap: false, sound: true, telemetry: false, uhd: false, ai: true },
   (() => { try { return JSON.parse(localStorage.getItem('sfc-prefs') || '{}'); } catch (e) { return {}; } })());
+if (prefs.aspect === '3:4') prefs.aspect = '4:3'; if (prefs.aspect === '9:16') prefs.aspect = '16:9';
+if (!ASPECTS.some(a => a.id === prefs.aspect)) prefs.aspect = '4:3';
 const savePrefs = () => { try { localStorage.setItem('sfc-prefs', JSON.stringify(prefs)); } catch (e) {} };
 
 const app = $('#app'), stage = $('#stage'), video = $('#video'), still = $('#still'), frame = $('#frame');
@@ -432,7 +470,8 @@ const S = {
   isStill: false, W: 0, H: 0, dz: 1, zoom: 1, torch: false, roll: 0, gyro: false,
   subj: null, conf: 0, source: 'saliency', plan: null, tx: 1 / 3, ty: 1 / 3,
   score: 0, locked: false, lockStart: 0, needUnlock: false, cooldown: 0,
-  manual: null, faces: null, photos: [], busy: false, audio: null, lastA: null
+  manual: null, faces: null, photos: [], busy: false, audio: null, lastA: null,
+  physK: 0, flat: false, mismatchSince: 0, lastHint: 0
 };
 let cur = null, prevLum = null, lastAnalysis = 0, lastRender = 0, lastFace = 0, faceBusy = false, faceDet = null;
 const aCanvas = document.createElement('canvas'), fCanvas = document.createElement('canvas');
@@ -455,7 +494,12 @@ function toSrc(r) {
   const x = S.mirror ? v.x + (S.W - (r.x + r.w)) * fx : v.x + r.x * fx;
   return { x, y: v.y + r.y * fy, w: r.w * fx, h: r.h * fy };
 }
-const aspectObj = () => ASPECTS.find(a => a.id === prefs.aspect) || ASPECTS[0];
+const isLandscape = () => S.W > S.H;
+// Rasio selalu mengikuti orientasi layar: landscape = sisi panjang di lebar, potret = di tinggi
+const aspectObj = () => {
+  const a = ASPECTS.find(x => x.id === prefs.aspect) || ASPECTS[0], land = isLandscape(), p = a.id.split(':');
+  return { id: land ? a.id : p[1] + ':' + p[0], r: land ? a.long : 1 / a.long };
+};
 const filterObj = () => FILTERS.find(f => f.id === prefs.filter) || FILTERS[0];
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); }
@@ -534,10 +578,10 @@ async function toggleFlash() {
 
 /* gyro */
 function onOrient(e) {
-  const ang = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-  if (e.gamma == null || (ang !== 0 && ang !== 180)) { S.roll *= 0.8; return; }
-  const r = ang === 180 ? -e.gamma : e.gamma;
-  S.gyro = true; S.roll += (clamp(r, -45, 45) - S.roll) * 0.25;
+  if (e.beta == null || e.gamma == null) return;
+  const r = attitudeFromAngles(e.beta, e.gamma, S.physK);
+  S.gyro = true; S.flat = r.flat; S.physK = r.k;
+  S.roll += ((r.flat ? 0 : r.roll) - S.roll) * 0.25;
 }
 async function enableGyro() {
   try {
@@ -618,6 +662,16 @@ function analyze(now) {
   if (S.locked && prefs.snap && !S.needUnlock && now > S.cooldown && !S.busy) { S.cooldown = now + 2500; S.needUnlock = true; takePhoto(); }
 
   // teks
+  const spx = (S.subj.x1 - S.subj.x0) * W, spy = (S.subj.y1 - S.subj.y0) * H, sar = spx / Math.max(1, spy);
+  let rot = '';
+  if (prefs.ai && S.conf >= 0.4 && !S.isStill) {
+    if (W > H && sar < 0.6) rot = 'Subjek tinggi — putar HP ke posisi potret';
+    else if (W < H && sar > 1.7) rot = 'Subjek lebar — putar HP ke posisi landscape';
+  }
+  if (S.gyro && !S.flat && !S.isStill && (Math.abs(S.physK) === 1) !== (W > H)) {
+    if (!S.mismatchSince) S.mismatchSince = now;
+    if (now - S.mismatchSince > 1500 && now - S.lastHint > 25000) { S.lastHint = now; toast('Tampilan belum ikut berputar — aktifkan Putar Otomatis (Auto-rotate) di HP'); }
+  } else S.mismatchSince = 0;
   let badge, hud;
   const dir = () => {
     if (Math.abs(plan.ex) >= Math.abs(plan.ey)) return plan.ex < 0 ? 'ke kiri' : 'ke kanan';
@@ -627,6 +681,7 @@ function analyze(now) {
   else if (S.locked) { badge = 'Terkunci & optimal'; hud = 'KOMPOSISI OPTIMAL — tekan shutter!'; }
   else if (S.conf < 0.3) { badge = 'Mencari subjek'; hud = 'Subjek belum jelas — dekatkan atau ketuk layar untuk memilih'; }
   else if (okNow) { badge = 'Hampir optimal'; hud = 'Tahan posisi sebentar…'; }
+  else if (rot) { badge = 'Putar HP'; hud = rot; }
   else switch (sc.weakest) {
     case 'level': badge = 'Kamera miring'; hud = `Luruskan HP (${S.roll.toFixed(1)}°)`; break;
     case 'size': badge = sc.sizeDir === 'small' ? 'Subjek kecil' : 'Terlalu dekat'; hud = sc.sizeDir === 'small' ? 'Dekatkan atau zoom ke subjek' : 'Mundur sedikit — subjek terlalu besar'; break;
@@ -640,13 +695,13 @@ function analyze(now) {
   setText($('#badgeL'), badge); setText($('#badgeR'), score + '%');
   setText($('#hudIn'), hud);
   const sr = toSrc(cur || plan);
-  setText($('#badgeB'), `${aspectObj().id} · ${Math.round(sr.w)}×${Math.round(sr.h)}`);
+  setText($('#badgeB'), `${W > H ? '▭' : '▯'} ${aspectObj().id} · ${Math.round(sr.w)}×${Math.round(sr.h)}`);
 
   // leveler
   const lv = $('#level');
-  if (S.gyro && !S.isStill && Math.abs(S.roll) > 0.4) {
+  if (S.gyro && !S.isStill && !S.flat && Math.abs(S.roll) > 0.4) {
     lv.style.display = 'flex'; const l = $('#levelLine');
-    l.style.transform = `rotate(${-S.roll}deg)`; l.classList.toggle('ok', Math.abs(S.roll) < 1.5);
+    l.style.transform = `rotate(${S.roll}deg)`; l.classList.toggle('ok', Math.abs(S.roll) < 1.5);
     setText($('#levelTxt'), S.roll.toFixed(1) + '°');
   } else lv.style.display = 'none';
 
@@ -777,13 +832,13 @@ function syncUI() {
   app.dataset.ai = prefs.ai ? '1' : '0'; app.dataset.grid = prefs.grid; app.dataset.snap = prefs.snap ? '1' : '0';
   $('#btnAI').classList.toggle('on', prefs.ai); $('#btnSnap').classList.toggle('on', prefs.snap);
   $('#gridName').textContent = (GRIDS.find(g => g.id === prefs.grid) || GRIDS[0]).name;
-  $('#btnAspect').textContent = prefs.aspect;
+  $('#btnAspect').textContent = aspectObj().id;
   $$('#filters button').forEach(b => b.classList.toggle('on', b.dataset.f === prefs.filter));
   $$('.tgl').forEach(b => b.setAttribute('aria-pressed', prefs[b.dataset.pref] ? 'true' : 'false'));
   applyZoomStyle(); savePrefs();
 }
 $('#btnAI').onclick = () => { prefs.ai = !prefs.ai; S.locked = false; S.lockStart = 0; syncUI(); };
-$('#btnGrid').onclick = () => { const i = GRIDS.findIndex(g => g.id === prefs.grid); prefs.grid = GRIDS[(i + 1) % GRIDS.length].id; syncUI(); };
+$('#btnGrid').onclick = () => { const i = GRIDS.findIndex(g => g.id === prefs.grid); prefs.grid = GRIDS[(i + 1) % GRIDS.length].id; syncUI(); toast('Grid: ' + GRIDS.find(g => g.id === prefs.grid).name); };
 $('#btnAspect').onclick = () => { const i = ASPECTS.findIndex(a => a.id === prefs.aspect); prefs.aspect = ASPECTS[(i + 1) % ASPECTS.length].id; syncUI(); };
 $('#btnSnap').onclick = () => { prefs.snap = !prefs.snap; if (prefs.snap) toast('Auto-snap aktif: foto otomatis saat bingkai hijau'); syncUI(); };
 $('#filters').innerHTML = FILTERS.map(f => `<button data-f="${f.id}">${f.name}</button>`).join('');
@@ -835,7 +890,11 @@ $('#startBtn').onclick = async () => {
 };
 
 // ukuran stage
-const ro = new ResizeObserver(() => { S.W = stage.clientWidth; S.H = stage.clientHeight; cur = null; prevLum = null; });
+const ro = new ResizeObserver(() => {
+  S.W = stage.clientWidth; S.H = stage.clientHeight;
+  cur = null; prevLum = null; S.plan = null; S.subj = null; S.faces = null; S.locked = false; S.lockStart = 0; S.mismatchSince = 0;
+  $('#btnAspect').textContent = aspectObj().id;
+});
 ro.observe(stage);
 document.addEventListener('visibilitychange', () => { if (document.hidden) prevLum = null; });
 
