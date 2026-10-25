@@ -223,7 +223,7 @@ button{font:inherit;color:inherit}
 
   <!-- galeri -->
   <div class="modal" id="mGallery">
-    <div class="mh"><span>Galeri Hasil Smart Crop</span><button class="ib" data-close="mGallery"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="mh"><span>Galeri Hasil Smart Crop</span><span style="display:flex;gap:8px;align-items:center"><button class="pill" id="btnClearAll">Hapus semua</button><button class="ib" data-close="mGallery"><svg class="i"><use href="#i-x"/></svg></button></span></div>
     <div class="mb" id="galList"></div>
   </div>
 
@@ -234,10 +234,12 @@ button{font:inherit;color:inherit}
       <button class="tgl" data-pref="sound" aria-pressed="true"><span>Suara &amp; getar<small>Bunyi saat terkunci dan saat shutter</small></span><span class="sw"></span></button>
       <button class="tgl" data-pref="telemetry" aria-pressed="false"><span>Telemetri analisis<small>Tampilkan skor, subjek, dan kotak deteksi</small></span><span class="sw"></span></button>
       <button class="tgl" data-pref="uhd" aria-pressed="false"><span>Resolusi tinggi (4K)<small>Hasil lebih tajam, lebih berat di HP lama</small></span><span class="sw"></span></button>
+      <button class="tgl" data-pref="sensor" aria-pressed="true"><span>Foto sensor penuh<small>Pakai ImageCapture (Chrome Android) untuk foto lebih tajam daripada frame video</small></span><span class="sw"></span></button>
+      <button class="tgl" data-pref="detect" aria-pressed="true"><span>Deteksi objek AI<small>Kenali orang, wajah, hewan, makanan, kendaraan (model ±5 MB, diunduh sekali)</small></span><span class="sw"></span></button>
       <div style="padding:14px 0;display:flex;flex-direction:column;gap:10px">
         <button class="btn g" id="btnImport"><svg class="i" style="width:16px;height:16px"><use href="#i-images"/></svg>Coba Smart Crop dengan foto dari galeri</button>
         <button class="btn" id="btnBackCam" style="display:none">Kembali ke kamera</button>
-        <small id="detInfo" style="color:rgba(255,255,255,.5);line-height:1.5"></small>
+        <small id="detInfo" style="color:rgba(255,255,255,.5);line-height:1.5;white-space:pre-line"></small>
       </div>
     </div>
   </div>
@@ -251,7 +253,8 @@ button{font:inherit;color:inherit}
       <p><b>3. Skor &amp; kunci hijau.</b> Skor menggabungkan kecocokan titik sepertiga, ukuran subjek, subjek tidak terpotong, kemiringan HP (gyro), kestabilan, ketajaman, dan pencahayaan. Skor ≥ 78% yang bertahan ±0,7 detik mengunci bingkai menjadi hijau neon.</p>
       <p><b>4. Orientasi otomatis.</b> Layout, rasio crop, dan indikator level mengikuti posisi HP (potret/landscape/terbalik) lewat sensor gravitasi. Subjek tinggi atau lebar akan disarankan memutar HP ke posisi yang lebih pas. Aktifkan Putar Otomatis di HP.</p>
       <p><b>5. Ketuk layar</b> untuk menunjuk subjek sendiri. Ketuk chip "Subjek manual" untuk kembali otomatis.</p>
-      <p><b>6. Preset look.</b> Pura Gold/Vivid/Natural, iPhone, Hasselblad, Leica (Authentic, Vivid, Mono), dan Zeiss adalah look buatan sendiri yang terinspirasi karakter warnanya, bukan replika resmi. Preset bisa diganti kapan saja di Galeri karena foto disimpan tanpa filter.</p>
+      <p><b>6. AI & kualitas.</b> Deteksi objek MediaPipe mengenali orang, wajah, hewan, makanan, dan kendaraan (model diunduh sekali dari internet). Di Chrome Android, foto diambil dari resolusi sensor (ImageCapture); jika pemetaan crop tidak meyakinkan, aplikasi otomatis memakai frame video. Foto tersimpan permanen di penyimpanan browser (IndexedDB).</p>
+      <p><b>6b. Preset look.</b> Pura Gold/Vivid/Natural, iPhone, Hasselblad, Leica (Authentic, Vivid, Mono), dan Zeiss adalah look buatan sendiri yang terinspirasi karakter warnanya, bukan replika resmi. Preset bisa diganti kapan saja di Galeri karena foto disimpan tanpa filter.</p>
       <p><b>7. Saran AI.</b> Di Galeri, tombol "Saran AI" menelusuri ratusan kandidat crop pada satu foto (beragam rasio dan ukuran), menilai subjek, titik sepertiga, tepi yang tidak memotong subjek, dan kekuatan warna, lalu menampilkan 4 komposisi terbaik beserta palet dan jenis keselarasan warnanya.</p>
       <p><b>8. Menyimpan.</b> Browser tidak bisa menulis langsung ke Galeri. Tombol Simpan membuka menu Bagikan (pilih "Simpan ke Foto/Galeri") atau mengunduh file JPG.</p>
     </div>
@@ -641,6 +644,15 @@ function suggestCrops(data, w, h, opt) {
   return { candidates: out, palette: whole, harmony: wholeH };
 }
 
+
+// Korelasi silang ternormalisasi (-1..1) untuk memvalidasi pemetaan crop ke foto sensor
+function ncc(a, b) {
+  const n = Math.min(a.length, b.length);
+  let ma = 0, mb = 0; for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; } ma /= n; mb /= n;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < n; i++) { const x = a[i] - ma, y = b[i] - mb; sab += x * y; saa += x * x; sbb += y * y; }
+  return sab / Math.sqrt(saa * sbb + 1e-9);
+}
 /* PURE:END */
 
 /* ---------- state & prefs ---------- */
@@ -667,7 +679,7 @@ const lookCss = L => L.none ? '' : [
 const FILTERS = LOOKS.map(L => Object.assign({ css: lookCss(L) }, L));
 const LOCK_ON = 78, LOCK_OFF = 66, HOLD_MS = 700;
 
-const prefs = Object.assign({ aspect: '4:3', filter: 'gold', grid: 'thirds', snap: false, sound: true, telemetry: false, uhd: false, ai: true },
+const prefs = Object.assign({ aspect: '4:3', filter: 'gold', grid: 'thirds', snap: false, sound: true, telemetry: false, uhd: false, ai: true, detect: true, sensor: true },
   (() => { try { return JSON.parse(localStorage.getItem('sfc-prefs') || '{}'); } catch (e) { return {}; } })());
 if (prefs.aspect === '3:4') prefs.aspect = '4:3'; if (prefs.aspect === '9:16') prefs.aspect = '16:9';
 if (!ASPECTS.some(a => a.id === prefs.aspect)) prefs.aspect = '4:3';
@@ -687,6 +699,81 @@ const aCanvas = document.createElement('canvas'), fCanvas = document.createEleme
 const actx = aCanvas.getContext('2d', { willReadFrequently: true });
 const fctx = fCanvas.getContext('2d');
 try { if ('FaceDetector' in window) faceDet = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 6 }); } catch (e) { faceDet = null; }
+
+/* ---------- detektor MediaPipe (dimuat malas; jika gagal -> saliency) ---------- */
+const MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const MP_MODELS = {
+  face: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+  obj: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite'
+};
+const LABELS_ID = { person: 'Orang', cat: 'Kucing', dog: 'Anjing', bird: 'Burung', horse: 'Kuda', sheep: 'Domba', cow: 'Sapi', elephant: 'Gajah', bear: 'Beruang', zebra: 'Zebra', giraffe: 'Jerapah', bicycle: 'Sepeda', car: 'Mobil', motorcycle: 'Motor', airplane: 'Pesawat', bus: 'Bus', train: 'Kereta', truck: 'Truk', boat: 'Perahu', bottle: 'Botol', cup: 'Cangkir', 'wine glass': 'Gelas', bowl: 'Mangkuk', banana: 'Pisang', apple: 'Apel', sandwich: 'Roti', orange: 'Jeruk', pizza: 'Pizza', donut: 'Donat', cake: 'Kue', chair: 'Kursi', couch: 'Sofa', 'potted plant': 'Tanaman', bed: 'Kasur', 'dining table': 'Meja makan', tv: 'TV', laptop: 'Laptop', 'cell phone': 'HP', book: 'Buku', vase: 'Vas', 'teddy bear': 'Boneka', clock: 'Jam', 'sports ball': 'Bola', umbrella: 'Payung', backpack: 'Ransel', handbag: 'Tas', bench: 'Bangku', kite: 'Layangan' };
+const D = { state: 'idle', face: null, obj: null, last: 0, ts: 0 };
+function setDetInfo() {
+  const a = !prefs.detect ? 'Deteksi objek AI: nonaktif.'
+    : D.state === 'ready' ? `Deteksi objek AI: aktif (${[D.face && 'wajah', D.obj && 'objek'].filter(Boolean).join(' + ')}, MediaPipe).`
+    : D.state === 'loading' ? 'Deteksi objek AI: memuat model (sekali, ±5 MB)…'
+    : D.state === 'failed' ? 'Deteksi objek AI gagal dimuat (offline atau diblokir) — memakai analisis saliency.'
+    : 'Deteksi objek AI: menunggu kamera.';
+  const b = S.isStill ? '' : !prefs.sensor ? 'Foto sensor penuh: nonaktif.' : S.ic ? 'Foto sensor penuh: tersedia (ImageCapture).' : 'Foto sensor penuh: tidak didukung browser ini — memakai frame video.';
+  $('#detInfo').textContent = [a, b].filter(Boolean).join('\n');
+}
+async function loadDetectors() {
+  if (D.state === 'loading' || D.state === 'ready') return;
+  D.state = 'loading'; setDetInfo();
+  try {
+    const mp = await import(MP_BASE + '/vision_bundle.mjs');
+    const fs = await mp.FilesetResolver.forVisionTasks(MP_BASE + '/wasm');
+    const make = async (Cls, url, extra) => {
+      for (const delegate of ['GPU', 'CPU']) {
+        try { return await Cls.createFromOptions(fs, Object.assign({ baseOptions: { modelAssetPath: url, delegate }, runningMode: 'VIDEO' }, extra)); }
+        catch (e) { if (delegate === 'CPU') throw e; }
+      }
+    };
+    D.face = await make(mp.FaceDetector, MP_MODELS.face, { minDetectionConfidence: 0.5 }).catch(e => { console.warn('face detector', e); return null; });
+    D.obj = await make(mp.ObjectDetector, MP_MODELS.obj, { scoreThreshold: 0.4, maxResults: 8 }).catch(e => { console.warn('object detector', e); return null; });
+    D.state = D.face || D.obj ? 'ready' : 'failed';
+  } catch (e) { console.warn('MediaPipe gagal dimuat', e); D.state = 'failed'; }
+  setDetInfo();
+}
+function maybeDetectMP(m, vis, now) {
+  if (!prefs.detect || D.state !== 'ready') return false;
+  if (now - D.last < 280) return true;
+  D.last = now;
+  const fw = 320, fh = clamp(Math.round(fw * S.H / S.W), 80, 640);
+  fCanvas.width = fw; fCanvas.height = fh;
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (S.mirror) { fctx.translate(fw, 0); fctx.scale(-1, 1); }
+  fctx.drawImage(m, vis.x, vis.y, vis.w, vis.h, 0, 0, fw, fh);
+  D.ts = Math.max(D.ts + 1, Math.round(now));
+  const nb = (b, s, name) => ({ x0: clamp(b.originX / fw, 0, 1), y0: clamp(b.originY / fh, 0, 1), x1: clamp((b.originX + b.width) / fw, 0, 1), y1: clamp((b.originY + b.height) / fh, 0, 1), s, name });
+  try {
+    if (D.face) {
+      const fs = (D.face.detectForVideo(fCanvas, D.ts).detections || []).filter(d => d.boundingBox).map(d => nb(d.boundingBox, d.categories && d.categories[0] ? d.categories[0].score : 0.5));
+      if (fs.length) S.faces = { x0: Math.min(...fs.map(f => f.x0)), y0: Math.min(...fs.map(f => f.y0)), x1: Math.max(...fs.map(f => f.x1)), y1: Math.max(...fs.map(f => f.y1)), t: now, n: fs.length };
+    }
+    if (D.obj) {
+      const os = (D.obj.detectForVideo(fCanvas, D.ts).detections || []).filter(d => d.boundingBox && d.categories && d.categories[0])
+        .map(d => nb(d.boundingBox, d.categories[0].score, d.categories[0].categoryName));
+      S.objs = { t: now, list: os };
+    }
+  } catch (e) { console.warn('deteksi gagal', e); D.state = 'failed'; setDetInfo(); }
+  return true;
+}
+function pickObject(list) {
+  let best = null, bs = 0;
+  for (const o of list) {
+    const area = (o.x1 - o.x0) * (o.y1 - o.y0);
+    if (area < 0.012 || area > 0.9) continue;
+    const sc = o.s * (0.35 + Math.sqrt(area)) + (o.name === 'person' ? 0.15 : 0);
+    if (sc > bs) { bs = sc; best = o; }
+  }
+  if (!best) return null;
+  if (best.name === 'person') {
+    const ps = list.filter(o => o.name === 'person' && o.s >= 0.5);
+    if (ps.length > 1) best = { name: 'person', s: best.s, x0: Math.min(...ps.map(o => o.x0)), y0: Math.min(...ps.map(o => o.y0)), x1: Math.max(...ps.map(o => o.x1)), y1: Math.max(...ps.map(o => o.y1)), n: ps.length };
+  }
+  return best;
+}
 
 /* ---------- helpers ---------- */
 const media = () => (S.isStill ? still : video);
@@ -728,7 +815,14 @@ const setText = (el, t) => { if (el._t !== t) { el.textContent = t; el._t = t; }
 /* ---------- kamera ---------- */
 function stopCamera() {
   if (S.stream) S.stream.getTracks().forEach(t => t.stop());
-  S.stream = null; S.track = null; S.caps = {}; S.torch = false;
+  S.stream = null; S.track = null; S.caps = {}; S.torch = false; S.ic = null; S.photoCaps = null;
+}
+function setupIC() {
+  S.ic = null; S.photoCaps = null;
+  if (prefs.sensor && !S.isStill && S.track && 'ImageCapture' in window) {
+    try { S.ic = new ImageCapture(S.track); S.ic.getPhotoCapabilities().then(c => { S.photoCaps = c; }).catch(() => {}); } catch (e) { S.ic = null; }
+  }
+  setDetInfo();
 }
 async function startCamera() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('Kamera butuh koneksi aman (HTTPS) atau localhost.');
@@ -742,7 +836,8 @@ async function startCamera() {
   S.isStill = false; still.style.display = 'none'; video.style.display = 'block';
   S.mirror = S.facing === 'user';
   S.zoom = 1; S.dz = 1; applyZoomStyle(); buildZoom();
-  prevLum = null; cur = null; S.faces = null; S.manual = null;
+  prevLum = null; cur = null; S.faces = null; S.objs = null; S.manual = null;
+  setupIC();
   $('#btnBackCam').style.display = 'none';
   $('#btnFlash').classList.remove('on'); setFlashIcon();
 }
@@ -829,6 +924,13 @@ function buildTarget(a, now) {
     const f = S.faces, fw = f.x1 - f.x0, fh = f.y1 - f.y0;
     return { cx: (f.x0 + f.x1) / 2, cy: f.y0 + fh * 0.4, x0: clamp(f.x0 - fw * 0.55, 0, 1), x1: clamp(f.x1 + fw * 0.55, 0, 1), y0: clamp(f.y0 - fh * 0.45, 0, 1), y1: clamp(f.y1 + fh * 1.5, 0, 1), conf: 1, src: f.n > 1 ? 'wajah×' + f.n : 'wajah', face: true };
   }
+  if (S.objs && now - S.objs.t < 1200 && S.objs.list.length) {
+    const o = pickObject(S.objs.list);
+    if (o) {
+      const isP = o.name === 'person', w = o.x1 - o.x0, h = o.y1 - o.y0, label = LABELS_ID[o.name] || o.name;
+      return { cx: (o.x0 + o.x1) / 2, cy: isP ? o.y0 + h * 0.3 : (o.y0 + o.y1) / 2, x0: clamp(o.x0 - w * 0.04, 0, 1), x1: clamp(o.x1 + w * 0.04, 0, 1), y0: clamp(o.y0 - h * 0.04, 0, 1), y1: clamp(o.y1 + h * 0.04, 0, 1), conf: clamp(0.55 + o.s * 0.45, 0, 1), src: o.n > 1 ? label + '×' + o.n : label, face: isP };
+    }
+  }
   return { cx: a.cx, cy: a.cy, x0: a.x0, x1: a.x1, y0: a.y0, y1: a.y1, conf: a.conf, src: 'saliency', face: false };
 }
 
@@ -845,7 +947,8 @@ function analyze(now) {
   actx.setTransform(1, 0, 0, 1, 0, 0);
   const a = analyzeFrame(actx.getImageData(0, 0, aw, ah).data, aw, ah, prevLum);
   prevLum = a.lum; S.lastA = a;
-  maybeDetectFaces(m, vis, now);
+  if (prefs.detect && D.state === 'idle') loadDetectors();
+  if (!maybeDetectMP(m, vis, now)) maybeDetectFaces(m, vis, now);
 
   const t = buildTarget(a, now);
   if (!S.subj || S.source !== t.src) { S.subj = Object.assign({}, t); }
@@ -904,7 +1007,8 @@ function analyze(now) {
   setText($('#badgeL'), badge); setText($('#badgeR'), score + '%');
   setText($('#hudIn'), hud);
   const sr = toSrc(cur || plan);
-  setText($('#badgeB'), `${W > H ? '▭' : '▯'} ${aspectObj().id} · ${Math.round(sr.w)}×${Math.round(sr.h)}`);
+  const sname = S.source === 'saliency' || S.source === 'manual' ? '' : S.source.charAt(0).toUpperCase() + S.source.slice(1);
+  setText($('#badgeB'), `${sname ? sname + ' · ' : ''}${W > H ? '▭' : '▯'} ${aspectObj().id} · ${Math.round(sr.w)}×${Math.round(sr.h)}`);
 
   // leveler
   const lv = $('#level');
@@ -948,7 +1052,46 @@ function loop(now) {
 
 /* ---------- ambil foto & edit ---------- */
 const toBlob = (c, q) => new Promise(r => c.toBlob(r, 'image/jpeg', q || 0.95));
-const MAX_PHOTOS = 10;
+const MAX_PHOTOS = 60;
+
+/* ---------- penyimpanan permanen (IndexedDB: meta & blob terpisah) ---------- */
+const DBX = (() => {
+  let ready = null, db = null;
+  const open = () => ready || (ready = new Promise((res, rej) => {
+    try {
+      const r = indexedDB.open('smartframe', 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore('photos', { keyPath: 'id' }); r.result.createObjectStore('blobs', { keyPath: 'id' }); };
+      r.onsuccess = () => { db = r.result; res(); }; r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('blocked'));
+    } catch (e) { rej(e); }
+  }));
+  const run = (stores, mode, fn) => open().then(() => new Promise((res, rej) => {
+    const t = db.transaction(stores, mode), reqs = fn(t);
+    t.oncomplete = () => res(Array.isArray(reqs) ? reqs.map(r => r.result) : undefined);
+    t.onerror = t.onabort = () => rej(t.error);
+  }));
+  const meta = p => ({ id: p.id, crop: p.crop, look: p.look, view: p.view, score: p.score, reason: p.reason, aspect: p.aspect, dims: p.dims, ts: p.ts, src: p.src, sugg: p.sugg, pick: p.pick, palette: p.palette, harmony: p.harmony });
+  return {
+    save: p => run(['photos', 'blobs'], 'readwrite', t => { t.objectStore('photos').put(meta(p)); t.objectStore('blobs').put({ id: p.id, ob: p.ob }); }),
+    saveMeta: p => run(['photos'], 'readwrite', t => { t.objectStore('photos').put(meta(p)); }),
+    del: id => run(['photos', 'blobs'], 'readwrite', t => { t.objectStore('photos').delete(id); t.objectStore('blobs').delete(id); }),
+    clear: () => run(['photos', 'blobs'], 'readwrite', t => { t.objectStore('photos').clear(); t.objectStore('blobs').clear(); }),
+    load: () => run(['photos', 'blobs'], 'readonly', t => [t.objectStore('photos').getAll(), t.objectStore('blobs').getAll()])
+  };
+})();
+let dbWarned = false;
+const dbFail = () => { if (!dbWarned) { dbWarned = true; toast('Penyimpanan permanen tidak tersedia (mode pribadi?)'); } };
+const _pt = new Map();
+function persistSoon(p) { clearTimeout(_pt.get(p.id)); _pt.set(p.id, setTimeout(() => DBX.saveMeta(p).catch(dbFail), 400)); }
+async function loadSaved() {
+  try {
+    const [metas, blobs] = await DBX.load();
+    const bm = new Map(blobs.map(b => [b.id, b.ob])), have = new Set(S.photos.map(p => p.id));
+    const loaded = metas.filter(m => bm.has(m.id) && !have.has(m.id)).map(m => Object.assign({ sugg: null, pick: 0, palette: null, harmony: null }, m, { ob: bm.get(m.id), cache: {}, bmpP: null }));
+    S.photos = S.photos.concat(loaded).sort((a, b) => b.id - a.id);
+    updateThumb();
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  } catch (e) { dbFail(); }
+}
 
 // Frame mentah (tanpa preset). Preset diterapkan belakangan, jadi bisa diganti di galeri.
 function renderRegion(m, r, maxSide) {
@@ -1002,6 +1145,56 @@ function freePhoto(p) {
 }
 function releaseBitmaps() { S.photos.forEach(p => { if (p.bmpP) { p.bmpP.then(b => b.close && b.close()).catch(() => {}); p.bmpP = null; } }); }
 
+function smallLum(src, region, mirror, w, h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  if (mirror) { x.translate(w, 0); x.scale(-1, 1); }
+  if (region) x.drawImage(src, region.x, region.y, region.w, region.h, 0, 0, w, h); else x.drawImage(src, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data, out = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < out.length; i++, p += 4) out[i] = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+  return out;
+}
+// Foto resolusi sensor lewat ImageCapture. Area yang terlihat di layar dipetakan ke foto, lalu DIVALIDASI
+// dengan korelasi terhadap frame pratinjau; jika tidak meyakinkan -> null (pakai frame video).
+async function sensorPhoto(m) {
+  if (!S.ic || S.isStill || !prefs.sensor) return null;
+  const [mw, mh] = msize(m), v = visRect(mw, mh, S.W, S.H, S.dz);
+  const tw = 40, th = clamp(Math.round(tw * S.H / S.W), 16, 120);
+  const ref = smallLum(renderRegion(m, { x: 0, y: 0, w: S.W, h: S.H }, 160), null, false, tw, th);
+  const caps = S.photoCaps, opt = {};
+  if (caps && caps.imageWidth && caps.imageHeight && caps.imageWidth.max) {
+    const W0 = caps.imageWidth.max, H0 = caps.imageHeight.max, w = clamp(4096, caps.imageWidth.min || 1, W0);
+    opt.imageWidth = Math.round(w); opt.imageHeight = Math.round(H0 * w / W0);
+  }
+  let blob;
+  try { blob = await S.ic.takePhoto(opt); } catch (e) { blob = await S.ic.takePhoto(); }
+  const bmp = await createImageBitmap(blob);
+  try {
+    const pw = bmp.width, ph = bmp.height, av = mw / mh, ap = pw / ph;
+    let fr;
+    if (ap < av) { const hh = pw / av; fr = { x: 0, y: (ph - hh) / 2, w: pw, h: hh }; } else { const ww = ph * av; fr = { x: (pw - ww) / 2, y: 0, w: ww, h: ph }; }
+    const sA = fr.w / mw;
+    const maps = [
+      { x: fr.x + v.x * sA, y: fr.y + v.y * sA, w: v.w * sA, h: v.h * sA },
+      { x: v.x * pw / mw, y: v.y * ph / mh, w: v.w * pw / mw, h: v.h * ph / mh }
+    ];
+    let best = null;
+    for (const region of maps) {
+      if (region.x < -2 || region.y < -2 || region.x + region.w > pw + 2 || region.y + region.h > ph + 2) continue;
+      for (const mir of (S.mirror ? [true, false] : [false])) {
+        const sc = ncc(smallLum(bmp, region, mir, tw, th), ref);
+        if (!best || sc > best.sc) best = { sc, region, mir };
+      }
+    }
+    if (!best || best.sc < 0.45) return null;
+    const r = best.region, k = Math.min(1, 4096 / Math.max(r.w, r.h));
+    const w = Math.max(1, Math.round(r.w * k)), h = Math.max(1, Math.round(r.h * k));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d'); if (best.mir) { x.translate(w, 0); x.scale(-1, 1); }
+    x.drawImage(bmp, r.x, r.y, r.w, r.h, 0, 0, w, h);
+    return c;
+  } finally { if (bmp.close) bmp.close(); }
+}
 async function takePhoto() {
   const m = media();
   if (S.busy || !m || !ready(m)) return;
@@ -1010,16 +1203,20 @@ async function takePhoto() {
   beep([800, 120], 0.1, 'triangle'); haptic(35);
   try {
     const rel = prefs.ai && cur ? { x: clamp(cur.x / S.W, 0, 1), y: clamp(cur.y / S.H, 0, 1), w: clamp(cur.w / S.W, 0.05, 1), h: clamp(cur.h / S.H, 0.05, 1) } : { x: 0, y: 0, w: 1, h: 1 };
-    const origC = renderRegion(m, { x: 0, y: 0, w: S.W, h: S.H }, prefs.uhd ? 4096 : 3200);
+    let origC = renderRegion(m, { x: 0, y: 0, w: S.W, h: S.H }, prefs.uhd ? 4096 : 3200), src = 'frame';
+    if (S.ic && !S.isStill && prefs.sensor) {
+      try { const sc = await sensorPhoto(m); if (sc) { origC = sc; src = 'sensor'; } } catch (e) { console.warn('ImageCapture gagal, pakai frame video', e); }
+    }
     const ob = await toBlob(origC, 0.95);
     const p = {
-      id: Date.now(), ob, crop: rel, look: prefs.filter, view: 'crop', score: Math.round(S.score), reason: $('#badgeL').textContent,
+      id: Date.now(), ob, crop: rel, look: prefs.filter, view: 'crop', score: Math.round(S.score), reason: $('#badgeL').textContent, src,
       aspect: prefs.ai ? aspectObj().id : 'Penuh', dims: `${Math.round(rel.w * origC.width)}×${Math.round(rel.h * origC.height)}`,
       cache: {}, bmpP: null, sugg: null, pick: 0, palette: null, harmony: null,
       ts: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
     };
     S.photos.unshift(p);
-    while (S.photos.length > MAX_PHOTOS) freePhoto(S.photos.pop());
+    DBX.save(p).catch(dbFail);
+    while (S.photos.length > MAX_PHOTOS) { const o = S.photos.pop(); freePhoto(o); DBX.del(o.id).catch(() => {}); }
     updateThumb();
   } catch (e) { console.error(e); toast('Gagal mengambil foto'); }
   S.busy = false;
@@ -1061,7 +1258,7 @@ function cardHtml(p) {
     ${p.sugg && p.sugg.length ? `<div class="sgs">${p.sugg.map((s, i) => `<div class="sg ${p.view === 'sugg' && p.pick === i ? 'on' : ''}" data-act="pick" data-i="${i}">
         <img alt=""><b><span>${s.tag}</span><span>${s.score}%</span></b>${palHtml(s.palette)}<small>${s.ar} · ${s.harmony}</small></div>`).join('')}</div>` : ''}
     <div class="chips">${FILTERS.map(f => `<button class="${p.look === f.id ? 'on' : ''}" data-act="look" data-look="${f.id}">${f.name}</button>`).join('')}</div>
-    <div class="meta"><span>${p.ts} · ${p.view === 'orig' ? 'Frame penuh' : p.view === 'sugg' && sg ? sg.ar : p.aspect} · ${lookOf(p.look).name}</span>
+    <div class="meta"><span>${p.ts}${p.src === 'sensor' ? ' · sensor penuh' : ''} · ${p.view === 'orig' ? 'Frame penuh' : p.view === 'sugg' && sg ? sg.ar : p.aspect} · ${lookOf(p.look).name}</span>
       <span><button class="btn p" data-act="save"><svg class="i" style="width:15px;height:15px"><use href="#i-down"/></svg>Simpan</button> <button class="btn d" data-act="del"><svg class="i" style="width:15px;height:15px"><use href="#i-trash"/></svg></button></span></div>
   </div>`;
 }
@@ -1070,12 +1267,17 @@ function renderGallery() {
   if (!S.photos.length) { box.innerHTML = '<div style="margin:auto;text-align:center;color:rgba(255,255,255,.45);font-size:12.5px;line-height:1.6">Belum ada foto.<br>Ambil foto saat bingkai berwarna hijau.</div>'; return; }
   box.innerHTML = S.photos.map(cardHtml).join('');
   box.scrollTop = top;
-  $$('.card', box).forEach(card => {
+  if (S.io) S.io.disconnect();
+  const hydrate = card => {
     const p = S.photos.find(x => String(x.id) === card.dataset.id); if (!p) return;
     const img = $('[data-main]', card);
     ensurePreview(p).then(u => { if (img.isConnected) img.src = u; }).catch(() => {});
     $$('.sg', card).forEach(sg => thumbFor(p, +sg.dataset.i).then(u => { const im = $('img', sg); if (im && im.isConnected) im.src = u; }).catch(() => {}));
-  });
+  };
+  if ('IntersectionObserver' in window) {
+    S.io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { S.io.unobserve(e.target); hydrate(e.target); } }), { root: box, rootMargin: '400px' });
+    $$('.card', box).forEach(c => S.io.observe(c));
+  } else $$('.card', box).forEach(hydrate);
 }
 async function saveBlob(blob, name) {
   const file = new File([blob], name, { type: 'image/jpeg' });
@@ -1089,13 +1291,13 @@ $('#galList').addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const card = b.closest('.card'), p = S.photos.find(x => String(x.id) === card.dataset.id); if (!p) return;
   const act = b.dataset.act;
-  if (act === 'view') { p.view = b.dataset.v; renderGallery(); }
-  else if (act === 'look') { p.look = b.dataset.look; renderGallery(); if (S.photos[0] === p) updateThumb(); }
-  else if (act === 'pick') { p.pick = +b.dataset.i; p.view = 'sugg'; renderGallery(); }
+  if (act === 'view') { p.view = b.dataset.v; persistSoon(p); renderGallery(); }
+  else if (act === 'look') { p.look = b.dataset.look; persistSoon(p); renderGallery(); if (S.photos[0] === p) updateThumb(); }
+  else if (act === 'pick') { p.pick = +b.dataset.i; p.view = 'sugg'; persistSoon(p); renderGallery(); }
   else if (act === 'sugg') {
     if (!p.sugg) { toast('Menganalisis komposisi & warna…'); try { await runSuggest(p); } catch (err) { console.error(err); toast('Analisis gagal'); return; } }
     else p.view = 'sugg';
-    renderGallery();
+    persistSoon(p); renderGallery();
   }
   else if (act === 'save') {
     toast('Menyiapkan foto resolusi penuh…');
@@ -1104,7 +1306,7 @@ $('#galList').addEventListener('click', async e => {
       await saveBlob(blob, `SmartCrop_${p.id}_${p.look}_${p.view}.jpg`);
     } catch (err) { console.error(err); toast('Gagal menyimpan'); }
   }
-  else if (act === 'del') { freePhoto(p); S.photos = S.photos.filter(x => x !== p); updateThumb(); renderGallery(); }
+  else if (act === 'del') { freePhoto(p); S.photos = S.photos.filter(x => x !== p); DBX.del(p.id).catch(() => {}); updateThumb(); renderGallery(); }
 });
 
 /* ---------- UI wiring ---------- */
@@ -1138,8 +1340,15 @@ $('#filters').onclick = e => { const b = e.target.closest('button'); if (b) { pr
 $$('.tgl').forEach(b => b.onclick = async () => {
   const k = b.dataset.pref; prefs[k] = !prefs[k]; syncUI();
   if (k === 'uhd' && !S.isStill && S.stream) { try { await startCamera(); } catch (e) { toast('Kamera gagal dimulai ulang'); } }
+  if (k === 'sensor') setupIC();
+  if (k === 'detect') { if (prefs.detect && D.state === 'failed') D.state = 'idle'; setDetInfo(); }
 });
-$('#detInfo').textContent = faceDet ? 'Deteksi wajah: aktif (Face Detector bawaan browser).' : 'Deteksi wajah: tidak tersedia di browser ini — memakai analisis saliency (kontras warna + tepi).';
+setDetInfo();
+
+$('#btnClearAll').onclick = async () => {
+  if (!S.photos.length || !confirm('Hapus semua foto tersimpan?')) return;
+  S.photos.forEach(freePhoto); S.photos = []; DBX.clear().catch(() => {}); updateThumb(); renderGallery();
+};
 
 // tap: pilih subjek manual
 stage.addEventListener('click', e => {
@@ -1161,7 +1370,7 @@ fileIn.onchange = () => {
   still.onload = () => {
     S.isStill = true; S.mirror = false; S.dz = 1; S.zoom = 1; S.caps = {}; S.torch = false; setFlashIcon();
     video.style.display = 'none'; still.style.display = 'block'; applyZoomStyle(); buildZoom();
-    prevLum = null; cur = null; S.faces = null; S.manual = null; S.running = true;
+    prevLum = null; cur = null; S.faces = null; S.objs = null; S.manual = null; S.running = true;
     $('#start').style.display = 'none'; $('#mSettings').classList.remove('open'); $('#btnBackCam').style.display = '';
     toast('Mode foto: smart crop dijalankan pada gambar');
   };
@@ -1184,13 +1393,13 @@ $('#startBtn').onclick = async () => {
 // ukuran stage
 const ro = new ResizeObserver(() => {
   S.W = stage.clientWidth; S.H = stage.clientHeight;
-  cur = null; prevLum = null; S.plan = null; S.subj = null; S.faces = null; S.locked = false; S.lockStart = 0; S.mismatchSince = 0;
+  cur = null; prevLum = null; S.plan = null; S.subj = null; S.faces = null; S.objs = null; S.locked = false; S.lockStart = 0; S.mismatchSince = 0;
   $('#btnAspect').textContent = aspectObj().id;
 });
 ro.observe(stage);
 document.addEventListener('visibilitychange', () => { if (document.hidden) prevLum = null; });
 
-syncUI(); buildZoom();
+syncUI(); buildZoom(); setDetInfo(); loadSaved();
 requestAnimationFrame(loop);
 })();
 </script>
