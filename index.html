@@ -76,7 +76,7 @@ button{font:inherit;color:inherit}
 .zoom{display:flex;gap:2px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:999px;padding:2px}
 .zoom button{min-width:30px;height:28px;border-radius:999px;border:0;background:none;color:rgba(255,255,255,.7);font:700 11px ui-monospace,Menlo,monospace;padding:0 6px;cursor:pointer}
 .zoom button.on{background:var(--gold);color:#000}
-#filters{display:flex;justify-content:center;gap:8px;overflow-x:auto;scrollbar-width:none}
+#filters{display:flex;justify-content:flex-start;gap:8px;overflow-x:auto;scrollbar-width:none}
 #filters::-webkit-scrollbar{display:none}
 #filters button{border:1px solid var(--line);background:rgba(255,255,255,.05);color:rgba(255,255,255,.65);border-radius:999px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}
 #filters button.on{background:var(--gold);color:#000;border-color:var(--gold)}
@@ -115,6 +115,19 @@ button{font:inherit;color:inherit}
 #toast{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);background:rgba(0,0,0,.88);border:1px solid var(--line);border-radius:999px;padding:8px 16px;font-size:12px;z-index:80;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center}
 #toast.show{opacity:1}
 
+#filters button{flex:none}#filters button:first-child{margin-left:auto}#filters button:last-child{margin-right:auto}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0}
+.chips::-webkit-scrollbar,.sgs::-webkit-scrollbar{display:none}
+.chips button{flex:none;border:1px solid var(--line);background:rgba(255,255,255,.05);color:rgba(255,255,255,.7);border-radius:999px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chips button.on{background:var(--gold);color:#000;border-color:var(--gold)}
+.sgs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none}
+.sg{flex:none;width:116px;border:1.5px solid var(--line);border-radius:12px;padding:5px;background:rgba(255,255,255,.04);cursor:pointer;display:flex;flex-direction:column;gap:4px}
+.sg.on{border-color:var(--green)}
+.sg img{width:100%;height:86px;object-fit:cover;border-radius:8px;background:#000}
+.sg b{font-size:10px;color:var(--gold);display:flex;justify-content:space-between;gap:4px}
+.sg small{font-size:9.5px;color:rgba(255,255,255,.6);line-height:1.3}
+.pal{display:flex;height:12px;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.15);width:100%}
+.pal i{display:block;height:100%}
 /* ===== LANDSCAPE: kontrol pindah ke sisi kiri & kanan, kamera mengisi tengah ===== */
 @media (orientation:landscape){
   #app{flex-direction:row}
@@ -238,7 +251,9 @@ button{font:inherit;color:inherit}
       <p><b>3. Skor &amp; kunci hijau.</b> Skor menggabungkan kecocokan titik sepertiga, ukuran subjek, subjek tidak terpotong, kemiringan HP (gyro), kestabilan, ketajaman, dan pencahayaan. Skor ≥ 78% yang bertahan ±0,7 detik mengunci bingkai menjadi hijau neon.</p>
       <p><b>4. Orientasi otomatis.</b> Layout, rasio crop, dan indikator level mengikuti posisi HP (potret/landscape/terbalik) lewat sensor gravitasi. Subjek tinggi atau lebar akan disarankan memutar HP ke posisi yang lebih pas. Aktifkan Putar Otomatis di HP.</p>
       <p><b>5. Ketuk layar</b> untuk menunjuk subjek sendiri. Ketuk chip "Subjek manual" untuk kembali otomatis.</p>
-      <p><b>6. Menyimpan.</b> Browser tidak bisa menulis langsung ke Galeri. Tombol Simpan membuka menu Bagikan (pilih "Simpan ke Foto/Galeri") atau mengunduh file JPG.</p>
+      <p><b>6. Preset look.</b> Pura Gold/Vivid/Natural, iPhone, Hasselblad, Leica (Authentic, Vivid, Mono), dan Zeiss adalah look buatan sendiri yang terinspirasi karakter warnanya, bukan replika resmi. Preset bisa diganti kapan saja di Galeri karena foto disimpan tanpa filter.</p>
+      <p><b>7. Saran AI.</b> Di Galeri, tombol "Saran AI" menelusuri ratusan kandidat crop pada satu foto (beragam rasio dan ukuran), menilai subjek, titik sepertiga, tepi yang tidak memotong subjek, dan kekuatan warna, lalu menampilkan 4 komposisi terbaik beserta palet dan jenis keselarasan warnanya.</p>
+      <p><b>8. Menyimpan.</b> Browser tidak bisa menulis langsung ke Galeri. Tombol Simpan membuka menu Bagikan (pilih "Simpan ke Foto/Galeri") atau mengunduh file JPG.</p>
     </div>
   </div>
 
@@ -363,7 +378,7 @@ function analyzeFrame(data, w, h, prevLum) {
     cx, cy, conf,
     x0: clamp(cx - hx, 0, 1), x1: clamp(cx + hx, 0, 1),
     y0: clamp(cy - hy, 0, 1), y1: clamp(cy + hy, 0, 1),
-    meanGrad, meanLum: ml, motion, lum
+    meanGrad, meanLum: ml, motion, lum, sal
   };
 }
 
@@ -445,17 +460,211 @@ function attitudeFromAngles(beta, gamma, prevK) {
   if (Math.abs(angDiff(phi, prevK * 90)) <= 55) k = prevK;
   return { flat: false, k, roll: clamp(angDiff(phi, k * 90), -45, 45) };
 }
+
+// ---- Preset look: pipeline piksel (dipakai untuk pratinjau galeri dan hasil simpan) ----
+function applyLookData(d, w, h, L) {
+  const gain = Math.pow(2, L.exp || 0), con = L.con == null ? 1 : L.con, sat = L.sat == null ? 1 : L.sat;
+  const wr = (L.warm || 0) * 20, tg = (L.tint || 0) * 14, fade = (L.fade || 0) * 42, cv = L.curve || 0;
+  const sh = L.shad || null, hi = L.high || null, vig = L.vig || 0, grain = (L.grain || 0) * 2;
+  const cx = w / 2, cy = h / 2, maxd = Math.hypot(cx, cy) || 1;
+  let seed = 2463534242;
+  for (let y = 0; y < h; y++) {
+    const dy = (y - cy) / maxd;
+    for (let x = 0; x < w; x++) {
+      const p = (y * w + x) * 4;
+      let r = d[p] * gain + wr, g = d[p + 1] * gain + tg, b = d[p + 2] * gain - wr;
+      const l = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (L.gray) { r = g = b = l; } else { r = l + (r - l) * sat; g = l + (g - l) * sat; b = l + (b - l) * sat; }
+      r = (r - 128) * con + 128; g = (g - 128) * con + 128; b = (b - 128) * con + 128;
+      if (cv) {
+        let v = clamp(r / 255, 0, 1); r = (v + cv * (v * v * (3 - 2 * v) - v)) * 255;
+        v = clamp(g / 255, 0, 1); g = (v + cv * (v * v * (3 - 2 * v) - v)) * 255;
+        v = clamp(b / 255, 0, 1); b = (v + cv * (v * v * (3 - 2 * v) - v)) * 255;
+      }
+      if (fade) { const k = 1 - fade / 255; r = fade + r * k; g = fade + g * k; b = fade + b * k; }
+      if (sh || hi) {
+        const l2 = clamp((0.299 * r + 0.587 * g + 0.114 * b) / 255, 0, 1), ws = (1 - l2) * (1 - l2), wh = l2 * l2;
+        if (sh) { r += sh[0] * ws; g += sh[1] * ws; b += sh[2] * ws; }
+        if (hi) { r += hi[0] * wh; g += hi[1] * wh; b += hi[2] * wh; }
+      }
+      if (vig) {
+        const dx = (x - cx) / maxd, dd = Math.sqrt(dx * dx + dy * dy), t = clamp((dd - 0.3) / 0.7, 0, 1);
+        const m = 1 - vig * t * t * (3 - 2 * t); r *= m; g *= m; b *= m;
+      }
+      if (grain) {
+        seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+        const nz = (seed / 4294967296 - 0.5) * grain * 6; r += nz; g += nz; b += nz;
+      }
+      d[p] = r; d[p + 1] = g; d[p + 2] = b;
+    }
+  }
+}
+
+function sharpenData(d, w, h, amt) {
+  if (!amt || w < 3 || h < 3) return;
+  const src = new Uint8ClampedArray(d);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const p = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const i = p + c, v = src[i];
+        d[i] = v + amt * (4 * v - src[i - 4] - src[i + 4] - src[i - w * 4] - src[i + w * 4]);
+      }
+    }
+  }
+}
+
+// ---- Palet warna & keselarasan ----
+function buildIntegral(src, w, h) {
+  const s = w + 1, I = new Float64Array(s * (h + 1));
+  for (let y = 1; y <= h; y++) {
+    let row = 0;
+    for (let x = 1; x <= w; x++) { row += src[(y - 1) * w + (x - 1)]; I[y * s + x] = I[(y - 1) * s + x] + row; }
+  }
+  return I;
+}
+function boxSum(I, w, x0, y0, x1, y1) { const s = w + 1; return I[y1 * s + x1] - I[y0 * s + x1] - I[y1 * s + x0] + I[y0 * s + x0]; }
+
+function extractPalette(data, w, h, r, k) {
+  k = k || 5;
+  const x0 = r ? r.x0 : 0, y0 = r ? r.y0 : 0, x1 = r ? r.x1 : w, y1 = r ? r.y1 : h;
+  const step = Math.max(1, Math.floor(Math.sqrt(Math.max(1, (x1 - x0) * (y1 - y0)) / 3000)));
+  const bins = new Map();
+  for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
+    const p = (y * w + x) * 4, q = ((data[p] >> 4) << 8) | ((data[p + 1] >> 4) << 4) | (data[p + 2] >> 4);
+    const b = bins.get(q);
+    if (b) { b[0]++; b[1] += data[p]; b[2] += data[p + 1]; b[3] += data[p + 2]; } else bins.set(q, [1, data[p], data[p + 1], data[p + 2]]);
+  }
+  const arr = [...bins.values()].map(b => ({ n: b[0], r: b[1] / b[0], g: b[2] / b[0], b: b[3] / b[0] })).sort((a, b) => b.n - a.n);
+  const dist = (a, b) => Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b);
+  const picks = [];
+  for (const c of arr) { if (picks.every(p => dist(p, c) > 56)) picks.push({ r: c.r, g: c.g, b: c.b, n: 0, sr: 0, sg: 0, sb: 0 }); if (picks.length >= k) break; }
+  let total = 0;
+  for (const c of arr) {
+    let best = picks[0], bd = 1e9;
+    for (const p of picks) { const dd = dist(p, c); if (dd < bd) { bd = dd; best = p; } }
+    best.n += c.n; best.sr += c.r * c.n; best.sg += c.g * c.n; best.sb += c.b * c.n; total += c.n;
+  }
+  return picks.filter(p => p.n > 0).sort((a, b) => b.n - a.n)
+    .map(p => ({ r: Math.round(p.sr / p.n), g: Math.round(p.sg / p.n), b: Math.round(p.sb / p.n), w: p.n / Math.max(1, total) }));
+}
+
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let hh = 0;
+  if (d > 1e-6) { if (mx === r) hh = ((g - b) / d) % 6; else if (mx === g) hh = (b - r) / d + 2; else hh = (r - g) / d + 4; hh *= 60; if (hh < 0) hh += 360; }
+  return { h: hh, s: mx ? d / mx : 0, v: mx };
+}
+function paletteHarmony(pal) {
+  const ch = pal.map(c => Object.assign({ hsv: rgb2hsv(c.r, c.g, c.b) }, c)).filter(c => c.hsv.s > 0.22 && c.hsv.v > 0.18 && c.w > 0.06);
+  const cw = ch.reduce((a, c) => a + c.w, 0);
+  if (ch.length < 2) return cw < 0.15 ? { name: 'Netral / Monokrom', score: 0.55 } : { name: 'Satu warna dominan', score: 0.7 };
+  ch.sort((a, b) => b.w - a.w);
+  const hd = (a, b) => Math.abs(angDiff(a, b));
+  const d12 = hd(ch[0].hsv.h, ch[1].hsv.h);
+  let spread = 0;
+  for (let i = 0; i < ch.length; i++) for (let j = i + 1; j < ch.length; j++) spread = Math.max(spread, hd(ch[i].hsv.h, ch[j].hsv.h));
+  if (spread <= 45) return { name: 'Analogus (selaras)', score: 0.85 };
+  if (d12 >= 150) return { name: 'Komplementer', score: 0.95 };
+  if (d12 >= 100) return { name: 'Triadik / split', score: 0.8 };
+  return { name: 'Kontras lembut', score: 0.7 };
+}
+
+// ---- Saran beberapa komposisi dalam satu foto ----
+function suggestCrops(data, w, h, opt) {
+  opt = opt || {};
+  const maxOut = opt.max || 4, n = w * h;
+  const a = analyzeFrame(data, w, h, null), sal = a.sal;
+  let mean = 0; for (let i = 0; i < n; i++) mean += sal[i]; mean /= n;
+  const s2 = new Float32Array(n), sx = new Float32Array(n), sy = new Float32Array(n), cm = new Float32Array(n);
+  for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i++) {
+    const v = Math.max(0, sal[i] - mean * 0.7); s2[i] = v; sx[i] = v * x; sy[i] = v * y;
+    const p = i * 4, mx = Math.max(data[p], data[p + 1], data[p + 2]), mn = Math.min(data[p], data[p + 1], data[p + 2]);
+    cm[i] = (mx - mn) / 255;
+  }
+  const Is = buildIntegral(s2, w, h), Ix = buildIntegral(sx, w, h), Iy = buildIntegral(sy, w, h), Ic = buildIntegral(cm, w, h);
+  const total = boxSum(Is, w, 0, 0, w, h);
+  const whole = extractPalette(data, w, h, null, 5), wholeH = paletteHarmony(whole);
+  if (total < 1e-6) return { candidates: [], palette: whole, harmony: wholeH };
+
+  const aspects = opt.aspects || [[4, 3], [3, 4], [1, 1], [3, 2], [2, 3], [16, 9], [9, 16]];
+  const scales = [1, 0.86, 0.73, 0.62, 0.52, 0.44];
+  const cands = [];
+  for (const [aw, ah] of aspects) {
+    const ar = aw / ah;
+    let mw, mh; if (w / h > ar) { mh = h; mw = h * ar; } else { mw = w; mh = w / ar; }
+    for (const s of scales) {
+      const cw = Math.round(mw * s), chh = Math.round(cw / ar);
+      if (cw < 10 || chh < 10 || cw > w || chh > h) continue;
+      const nx = Math.min(8, w - cw), ny = Math.min(8, h - chh);
+      for (let iy = 0; iy <= ny; iy++) for (let ix = 0; ix <= nx; ix++) {
+        const x0 = nx ? Math.round(ix * (w - cw) / nx) : 0, y0 = ny ? Math.round(iy * (h - chh) / ny) : 0;
+        const x1 = x0 + cw, y1 = y0 + chh;
+        const sIn = boxSum(Is, w, x0, y0, x1, y1);
+        if (sIn <= 1e-9) continue;
+        const cov = sIn / total;
+        const u = (boxSum(Ix, w, x0, y0, x1, y1) / sIn - x0 + 0.5) / cw, v = (boxSum(Iy, w, x0, y0, x1, y1) / sIn - y0 + 0.5) / chh;
+        const dm = Math.min(Math.hypot(u - 1 / 3, v - 1 / 3), Math.hypot(u - 2 / 3, v - 1 / 3), Math.hypot(u - 1 / 3, v - 2 / 3), Math.hypot(u - 2 / 3, v - 2 / 3));
+        const thirds = 1 - clamp(dm / 0.22, 0, 1);
+        const dens = (sIn / (cw * chh)) / (total / n), tight = clamp((dens - 1) / 1.0, 0, 1);
+        const bx = Math.round(cw * 0.06), by = Math.round(chh * 0.06);
+        const ring = sIn - boxSum(Is, w, x0 + bx, y0 + by, x1 - bx, y1 - by), border = clamp(ring / sIn / 0.14, 0, 1);
+        const color = clamp(boxSum(Ic, w, x0, y0, x1, y1) / (cw * chh) / 0.3, 0, 1);
+        const res = clamp((cw * chh) / n / 0.25, 0.4, 1);
+        const tot = (0.30 * Math.min(1, cov / 0.8) + 0.24 * thirds + 0.14 * tight + 0.14 * (1 - border) + 0.18 * color) * (0.8 + 0.2 * res);
+        cands.push({ x0, y0, x1, y1, cw, ch: chh, ar: aw + ':' + ah, s, total: tot, color, cov, thirds });
+      }
+    }
+  }
+  cands.sort((p, q) => q.total - p.total);
+  const iou = (p, q) => {
+    const ix = Math.max(0, Math.min(p.x1, q.x1) - Math.max(p.x0, q.x0)), iy = Math.max(0, Math.min(p.y1, q.y1) - Math.max(p.y0, q.y0));
+    const inter = ix * iy; return inter / (p.cw * p.ch + q.cw * q.ch - inter);
+  };
+  const pool = [];
+  for (const c of cands) { if (pool.every(q => iou(c, q) < 0.35)) pool.push(c); if (pool.length >= 10) break; }
+  for (const c of pool) {
+    c.palette = extractPalette(data, w, h, { x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }, 5);
+    c.harm = paletteHarmony(c.palette);
+    c.final = 0.85 * c.total + 0.15 * c.harm.score;
+  }
+  pool.sort((p, q) => q.final - p.final);
+  const top = pool.slice(0, maxOut);
+  let bestColor = -1, bc = 0.5;
+  top.forEach((c, i) => { if (i > 0 && c.color > bc) { bc = c.color; bestColor = i; } });
+  const out = top.map((c, i) => ({
+    x: c.x0 / w, y: c.y0 / h, w: c.cw / w, h: c.ch / h, score: Math.round(clamp(c.final * 100 * 1.08, 0, 99)),
+    ar: c.ar, palette: c.palette, harmony: c.harm.name, harmonyScore: c.harm.score, color: c.color,
+    tag: i === 0 ? 'Terbaik' : i === bestColor ? 'Warna terkuat' : c.s >= 0.85 ? 'Konteks luas' : c.s <= 0.55 ? 'Detail dekat' : 'Alternatif'
+  }));
+  return { candidates: out, palette: whole, harmony: wholeH };
+}
+
 /* PURE:END */
 
 /* ---------- state & prefs ---------- */
 const ASPECTS = [{ id: '4:3', long: 4 / 3 }, { id: '3:2', long: 3 / 2 }, { id: '16:9', long: 16 / 9 }, { id: '1:1', long: 1 }];
 const GRIDS = [{ id: 'thirds', name: 'Thirds' }, { id: 'phi', name: 'Golden' }, { id: 'center', name: 'Center' }, { id: 'none', name: 'Off' }];
-const FILTERS = [
-  { id: 'gold', name: 'Pura Gold', css: 'contrast(1.08) saturate(1.12) sepia(0.08)', sat: 1.12, con: 1.08, gray: false },
-  { id: 'vivid', name: 'Vivid', css: 'saturate(1.45) contrast(1.1)', sat: 1.45, con: 1.1, gray: false },
-  { id: 'mono', name: 'Mono', css: 'grayscale(1) contrast(1.2)', sat: 1, con: 1.2, gray: true },
-  { id: 'none', name: 'Standar', css: '', sat: 1, con: 1, gray: false }
+const LOOKS = [
+  { id: 'gold', name: 'Pura Gold', exp: 0.02, con: 1.08, sat: 1.10, warm: 0.22, curve: 0.25, high: [6, 3, -3] },
+  { id: 'pura', name: 'Pura Vivid', exp: 0.04, con: 1.10, sat: 1.28, warm: 0.10, curve: 0.32, high: [5, 2, -2], shad: [-2, 0, 4] },
+  { id: 'puran', name: 'Pura Natural', exp: 0, con: 1.04, sat: 1.03, warm: 0.03, curve: 0.15, fade: 0.02 },
+  { id: 'iphone', name: 'iPhone', exp: 0.08, con: 1.05, sat: 1.14, warm: 0.06, curve: 0.14, fade: 0.05, shad: [0, 0, 3], sharp: 0.15 },
+  { id: 'hassel', name: 'Hasselblad', exp: 0.02, con: 1.02, sat: 0.98, warm: 0.05, curve: 0.20, fade: 0.05, shad: [-2, 1, 4], high: [3, 2, 0] },
+  { id: 'leica', name: 'Leica Authentic', exp: -0.07, con: 1.20, sat: 0.90, warm: -0.02, curve: 0.50, vig: 0.22, grain: 3, sharp: 0.2, shad: [-3, 0, 3] },
+  { id: 'leicav', name: 'Leica Vivid', exp: -0.02, con: 1.16, sat: 1.32, warm: 0.02, curve: 0.45, vig: 0.15, grain: 2 },
+  { id: 'leicam', name: 'Leica Mono', gray: true, exp: -0.04, con: 1.30, curve: 0.55, vig: 0.30, grain: 6, sharp: 0.2 },
+  { id: 'zeiss', name: 'Zeiss', exp: 0, con: 1.10, sat: 1.05, warm: -0.08, curve: 0.30, sharp: 0.38, shad: [-4, 2, 7], high: [0, 1, 3] },
+  { id: 'none', name: 'Standar', none: true }
 ];
+// Pratinjau langsung di kamera memakai perkiraan CSS; hasil foto memakai pipeline piksel penuh.
+const lookCss = L => L.none ? '' : [
+  L.exp ? `brightness(${Math.pow(2, L.exp).toFixed(3)})` : '', `contrast(${(L.con || 1).toFixed(2)})`,
+  L.gray ? 'grayscale(1)' : `saturate(${(L.sat || 1).toFixed(2)})`,
+  L.warm > 0 ? `sepia(${(L.warm * 0.6).toFixed(2)})` : L.warm < 0 ? `hue-rotate(${(L.warm * 18).toFixed(0)}deg)` : ''
+].filter(Boolean).join(' ');
+const FILTERS = LOOKS.map(L => Object.assign({ css: lookCss(L) }, L));
 const LOCK_ON = 78, LOCK_OFF = 66, HOLD_MS = 700;
 
 const prefs = Object.assign({ aspect: '4:3', filter: 'gold', grid: 'thirds', snap: false, sound: true, telemetry: false, uhd: false, ai: true },
@@ -737,31 +946,62 @@ function loop(now) {
   render(now);
 }
 
-/* ---------- ambil foto ---------- */
-function pixelFilter(ctx, w, h, f) {
-  const id = ctx.getImageData(0, 0, w, h), d = id.data;
-  for (let i = 0; i < d.length; i += 4) {
-    let r = d[i], g = d[i + 1], b = d[i + 2];
-    const l = 0.299 * r + 0.587 * g + 0.114 * b;
-    if (f.gray) { r = g = b = l; } else { r = l + (r - l) * f.sat; g = l + (g - l) * f.sat; b = l + (b - l) * f.sat; }
-    d[i] = clamp((r - 128) * f.con + 128, 0, 255); d[i + 1] = clamp((g - 128) * f.con + 128, 0, 255); d[i + 2] = clamp((b - 128) * f.con + 128, 0, 255);
-  }
-  ctx.putImageData(id, 0, 0);
-}
-const hasCtxFilter = (() => { try { return 'filter' in CanvasRenderingContext2D.prototype; } catch (e) { return false; } })();
-const toBlob = c => new Promise(r => c.toBlob(r, 'image/jpeg', 0.95));
+/* ---------- ambil foto & edit ---------- */
+const toBlob = (c, q) => new Promise(r => c.toBlob(r, 'image/jpeg', q || 0.95));
+const MAX_PHOTOS = 10;
+
+// Frame mentah (tanpa preset). Preset diterapkan belakangan, jadi bisa diganti di galeri.
 function renderRegion(m, r, maxSide) {
   const s = toSrc(r), sc = Math.min(1, maxSide / Math.max(s.w, s.h));
   const w = Math.max(1, Math.round(s.w * sc)), h = Math.max(1, Math.round(s.h * sc));
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d'), f = filterObj();
-  if (hasCtxFilter && f.css) ctx.filter = f.css;
+  const ctx = c.getContext('2d');
   if (S.mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); }
   ctx.drawImage(m, s.x, s.y, s.w, s.h, 0, 0, w, h);
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.filter = 'none';
-  if (!hasCtxFilter && f.css) pixelFilter(ctx, w, h, f);
   return c;
 }
+const getBmp = p => p.bmpP || (p.bmpP = createImageBitmap(p.ob));
+const lookOf = id => FILTERS.find(f => f.id === id) || FILTERS[0];
+const viewRect = p => {
+  if (p.view === 'orig') return { x: 0, y: 0, w: 1, h: 1 };
+  if (p.view === 'sugg' && p.sugg && p.sugg[p.pick]) return p.sugg[p.pick].rect;
+  return p.crop;
+};
+async function renderPhoto(p, rect, lookId, maxSide) {
+  const bmp = await getBmp(p);
+  const sx = rect.x * bmp.width, sy = rect.y * bmp.height, sw = rect.w * bmp.width, sh = rect.h * bmp.height;
+  const sc = Math.min(1, maxSide / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * sc)), h = Math.max(1, Math.round(sh * sc));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, w, h);
+  const L = lookOf(lookId);
+  if (!L.none) {
+    const id = ctx.getImageData(0, 0, w, h);
+    applyLookData(id.data, w, h, L);
+    if (L.sharp) sharpenData(id.data, w, h, L.sharp);
+    ctx.putImageData(id, 0, 0);
+  }
+  return c;
+}
+async function ensurePreview(p) {
+  const k = `${p.view}|${p.view === 'sugg' ? p.pick : ''}|${p.look}`;
+  if (p.cache[k]) return p.cache[k];
+  const c = await renderPhoto(p, viewRect(p), p.look, 1100);
+  return p.cache[k] || (p.cache[k] = URL.createObjectURL(await toBlob(c, 0.9)));
+}
+async function thumbFor(p, i) {
+  const k = `t${i}|${p.look}`;
+  if (p.cache[k]) return p.cache[k];
+  const c = await renderPhoto(p, p.sugg[i].rect, p.look, 260);
+  return p.cache[k] || (p.cache[k] = URL.createObjectURL(await toBlob(c, 0.85)));
+}
+function freePhoto(p) {
+  Object.values(p.cache).forEach(u => URL.revokeObjectURL(u)); p.cache = {};
+  if (p.bmpP) { p.bmpP.then(b => b.close && b.close()).catch(() => {}); p.bmpP = null; }
+}
+function releaseBitmaps() { S.photos.forEach(p => { if (p.bmpP) { p.bmpP.then(b => b.close && b.close()).catch(() => {}); p.bmpP = null; } }); }
+
 async function takePhoto() {
   const m = media();
   if (S.busy || !m || !ready(m)) return;
@@ -769,35 +1009,73 @@ async function takePhoto() {
   const fl = $('#flash'); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
   beep([800, 120], 0.1, 'triangle'); haptic(35);
   try {
-    const rect = prefs.ai && cur ? { x: cur.x, y: cur.y, w: cur.w, h: cur.h } : { x: 0, y: 0, w: S.W, h: S.H };
-    const cropC = renderRegion(m, rect, 4096);
-    const origC = renderRegion(m, { x: 0, y: 0, w: S.W, h: S.H }, 3200);
-    const [cb, ob] = await Promise.all([toBlob(cropC), toBlob(origC)]);
-    const p = { id: Date.now(), cb, ob, cu: URL.createObjectURL(cb), ou: URL.createObjectURL(ob), score: Math.round(S.score), reason: $('#badgeL').textContent, aspect: prefs.ai ? aspectObj().id : 'Penuh', dims: `${cropC.width}×${cropC.height}`, view: 'crop', ts: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) };
+    const rel = prefs.ai && cur ? { x: clamp(cur.x / S.W, 0, 1), y: clamp(cur.y / S.H, 0, 1), w: clamp(cur.w / S.W, 0.05, 1), h: clamp(cur.h / S.H, 0.05, 1) } : { x: 0, y: 0, w: 1, h: 1 };
+    const origC = renderRegion(m, { x: 0, y: 0, w: S.W, h: S.H }, prefs.uhd ? 4096 : 3200);
+    const ob = await toBlob(origC, 0.95);
+    const p = {
+      id: Date.now(), ob, crop: rel, look: prefs.filter, view: 'crop', score: Math.round(S.score), reason: $('#badgeL').textContent,
+      aspect: prefs.ai ? aspectObj().id : 'Penuh', dims: `${Math.round(rel.w * origC.width)}×${Math.round(rel.h * origC.height)}`,
+      cache: {}, bmpP: null, sugg: null, pick: 0, palette: null, harmony: null,
+      ts: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    };
     S.photos.unshift(p);
-    if (S.photos.length > 30) { const o = S.photos.pop(); URL.revokeObjectURL(o.cu); URL.revokeObjectURL(o.ou); }
+    while (S.photos.length > MAX_PHOTOS) freePhoto(S.photos.pop());
     updateThumb();
   } catch (e) { console.error(e); toast('Gagal mengambil foto'); }
   S.busy = false;
 }
-function updateThumb() {
+async function updateThumb() {
   const t = $('#thumb'), c = $('#count');
-  if (S.photos.length) { t.src = S.photos[0].cu; t.style.display = 'block'; $('#thumbIcon').style.display = 'none'; c.textContent = S.photos.length; c.style.display = 'grid'; }
-  else { t.style.display = 'none'; $('#thumbIcon').style.display = ''; c.style.display = 'none'; }
+  if (S.photos.length) {
+    const p = S.photos[0];
+    try { t.src = await ensurePreview(p); } catch (e) {}
+    t.style.display = 'block'; $('#thumbIcon').style.display = 'none'; c.textContent = S.photos.length; c.style.display = 'grid';
+  } else { t.style.display = 'none'; $('#thumbIcon').style.display = ''; c.style.display = 'none'; }
+}
+
+/* ---------- saran komposisi AI ---------- */
+async function runSuggest(p) {
+  const bmp = await getBmp(p);
+  const sc = 128 / Math.max(bmp.width, bmp.height), aw = Math.max(16, Math.round(bmp.width * sc)), ah = Math.max(16, Math.round(bmp.height * sc));
+  const c = document.createElement('canvas'); c.width = aw; c.height = ah;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0, aw, ah);
+  const res = suggestCrops(ctx.getImageData(0, 0, aw, ah).data, aw, ah, { max: 4 });
+  p.sugg = res.candidates.map(x => Object.assign({ rect: { x: x.x, y: x.y, w: x.w, h: x.h } }, x));
+  p.palette = res.palette; p.harmony = res.harmony.name; p.pick = 0;
+  p.view = p.sugg.length ? 'sugg' : 'crop';
+  if (!p.sugg.length) toast('Belum menemukan komposisi yang jelas di foto ini');
 }
 
 /* ---------- galeri ---------- */
+const palHtml = pal => pal && pal.length ? `<div class="pal">${pal.map(c => `<i style="flex:${Math.max(1, Math.round(c.w * 100))};background:rgb(${c.r},${c.g},${c.b})"></i>`).join('')}</div>` : '';
+function cardHtml(p) {
+  const sg = p.view === 'sugg' && p.sugg && p.sugg[p.pick] ? p.sugg[p.pick] : null;
+  const pal = sg ? sg.palette : p.palette, harm = sg ? sg.harmony : p.harmony;
+  const vb = (v, label) => `<button class="pill ${p.view === v ? 'on' : ''}" data-act="view" data-v="${v}">${label}</button>`;
+  return `<div class="card" data-id="${p.id}">
+    <div class="meta"><span style="color:var(--gold);font-weight:700">Skor ${p.score}% · ${p.reason}</span></div>
+    <div class="meta" style="justify-content:flex-start">${vb('crop', 'AI Crop')}${vb('orig', 'Asli')}<button class="pill ${p.view === 'sugg' ? 'on' : ''}" data-act="sugg">✨ Saran AI</button></div>
+    <img data-main alt="" style="min-height:160px">
+    ${pal ? `<div class="meta" style="gap:8px">${palHtml(pal)}</div><div class="meta"><span>Palet warna · <b style="color:var(--gold)">${harm || ''}</b></span></div>` : ''}
+    ${p.sugg && p.sugg.length ? `<div class="sgs">${p.sugg.map((s, i) => `<div class="sg ${p.view === 'sugg' && p.pick === i ? 'on' : ''}" data-act="pick" data-i="${i}">
+        <img alt=""><b><span>${s.tag}</span><span>${s.score}%</span></b>${palHtml(s.palette)}<small>${s.ar} · ${s.harmony}</small></div>`).join('')}</div>` : ''}
+    <div class="chips">${FILTERS.map(f => `<button class="${p.look === f.id ? 'on' : ''}" data-act="look" data-look="${f.id}">${f.name}</button>`).join('')}</div>
+    <div class="meta"><span>${p.ts} · ${p.view === 'orig' ? 'Frame penuh' : p.view === 'sugg' && sg ? sg.ar : p.aspect} · ${lookOf(p.look).name}</span>
+      <span><button class="btn p" data-act="save"><svg class="i" style="width:15px;height:15px"><use href="#i-down"/></svg>Simpan</button> <button class="btn d" data-act="del"><svg class="i" style="width:15px;height:15px"><use href="#i-trash"/></svg></button></span></div>
+  </div>`;
+}
 function renderGallery() {
-  const box = $('#galList');
+  const box = $('#galList'), top = box.scrollTop;
   if (!S.photos.length) { box.innerHTML = '<div style="margin:auto;text-align:center;color:rgba(255,255,255,.45);font-size:12.5px;line-height:1.6">Belum ada foto.<br>Ambil foto saat bingkai berwarna hijau.</div>'; return; }
-  box.innerHTML = S.photos.map(p => `
-    <div class="card" data-id="${p.id}">
-      <div class="meta"><span style="color:var(--gold);font-weight:700">Skor ${p.score}% · ${p.reason}</span>
-        <span><button class="pill ${p.view === 'crop' ? 'on' : ''}" data-act="view" data-v="crop">AI Crop</button> <button class="pill ${p.view === 'orig' ? 'on' : ''}" data-act="view" data-v="orig">Asli</button></span></div>
-      <img src="${p.view === 'crop' ? p.cu : p.ou}" alt="">
-      <div class="meta"><span>${p.ts} · ${p.aspect} · ${p.dims}</span>
-        <span><button class="btn p" data-act="save"><svg class="i" style="width:15px;height:15px"><use href="#i-down"/></svg>Simpan</button> <button class="btn d" data-act="del"><svg class="i" style="width:15px;height:15px"><use href="#i-trash"/></svg></button></span></div>
-    </div>`).join('');
+  box.innerHTML = S.photos.map(cardHtml).join('');
+  box.scrollTop = top;
+  $$('.card', box).forEach(card => {
+    const p = S.photos.find(x => String(x.id) === card.dataset.id); if (!p) return;
+    const img = $('[data-main]', card);
+    ensurePreview(p).then(u => { if (img.isConnected) img.src = u; }).catch(() => {});
+    $$('.sg', card).forEach(sg => thumbFor(p, +sg.dataset.i).then(u => { const im = $('img', sg); if (im && im.isConnected) im.src = u; }).catch(() => {}));
+  });
 }
 async function saveBlob(blob, name) {
   const file = new File([blob], name, { type: 'image/jpeg' });
@@ -807,17 +1085,31 @@ async function saveBlob(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-$('#galList').addEventListener('click', e => {
+$('#galList').addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const card = b.closest('.card'), p = S.photos.find(x => String(x.id) === card.dataset.id); if (!p) return;
-  if (b.dataset.act === 'view') { p.view = b.dataset.v; renderGallery(); }
-  else if (b.dataset.act === 'save') saveBlob(p.view === 'crop' ? p.cb : p.ob, `SmartCrop_${p.id}_${p.view}.jpg`);
-  else if (b.dataset.act === 'del') { URL.revokeObjectURL(p.cu); URL.revokeObjectURL(p.ou); S.photos = S.photos.filter(x => x !== p); updateThumb(); renderGallery(); }
+  const act = b.dataset.act;
+  if (act === 'view') { p.view = b.dataset.v; renderGallery(); }
+  else if (act === 'look') { p.look = b.dataset.look; renderGallery(); if (S.photos[0] === p) updateThumb(); }
+  else if (act === 'pick') { p.pick = +b.dataset.i; p.view = 'sugg'; renderGallery(); }
+  else if (act === 'sugg') {
+    if (!p.sugg) { toast('Menganalisis komposisi & warna…'); try { await runSuggest(p); } catch (err) { console.error(err); toast('Analisis gagal'); return; } }
+    else p.view = 'sugg';
+    renderGallery();
+  }
+  else if (act === 'save') {
+    toast('Menyiapkan foto resolusi penuh…');
+    try {
+      const c = await renderPhoto(p, viewRect(p), p.look, 4096), blob = await toBlob(c, 0.95);
+      await saveBlob(blob, `SmartCrop_${p.id}_${p.look}_${p.view}.jpg`);
+    } catch (err) { console.error(err); toast('Gagal menyimpan'); }
+  }
+  else if (act === 'del') { freePhoto(p); S.photos = S.photos.filter(x => x !== p); updateThumb(); renderGallery(); }
 });
 
 /* ---------- UI wiring ---------- */
 const openM = id => { $('#' + id).classList.add('open'); if (id === 'mGallery') renderGallery(); };
-$$('[data-close]').forEach(b => b.onclick = () => $('#' + b.dataset.close).classList.remove('open'));
+$$('[data-close]').forEach(b => b.onclick = () => { $('#' + b.dataset.close).classList.remove('open'); if (b.dataset.close === 'mGallery') releaseBitmaps(); });
 $('#btnGallery').onclick = () => openM('mGallery');
 $('#btnSettings').onclick = () => openM('mSettings');
 $('#btnGuide').onclick = () => openM('mGuide');
